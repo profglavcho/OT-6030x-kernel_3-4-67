@@ -1,5 +1,5 @@
 ====================================================
-= 3.4.67 kernel source code for Newman N1 (MT6577) =
+= 3.4.67 kernel source code for Alcatel Idol OT-6030x (MT6577) =
 ====================================================
 
 *************************************
@@ -19,11 +19,11 @@ In order to get kernel compilation working, make sure you follow one of these st
 
 - To begin with the build process:
   -- Go back to project root folder
-  -- Run command: ./mk -t newmann1 n k
+  -- Run command: ./mk -t diablo1 n k
 
 - Once finished, you will find:
   -- The new kernel file in the folder "/out/Download/flash/"
-  -- Rename the new kernel file "kernel_newmann1.bin" to "kernel"
+  -- Rename the new kernel file "kernel_diablo1.bin" to "kernel"
 
 - Create new boot.img:
   -- Repack the new generated kernel file with ramdisk.
