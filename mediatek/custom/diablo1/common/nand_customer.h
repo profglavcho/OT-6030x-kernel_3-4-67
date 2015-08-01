@@ -1,4 +1,3 @@
-
 #ifndef __NAND_CUSTOMER_H__
 #define __NAND_CUSTOMER_H__
 
