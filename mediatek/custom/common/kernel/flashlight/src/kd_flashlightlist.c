@@ -11,33 +11,32 @@
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/platform_device.h>
+#include <linux/i2c.h>
 #include <linux/cdev.h>
 #include <linux/errno.h>
 #include <linux/time.h>
+#include <linux/timer.h>
 #include "kd_flashlight.h"
 #include <asm/io.h>
 #include <asm/uaccess.h>
 #include "kd_camera_hw.h"
 
-//<2014/05/16-Yuting Shih-jessicatseng. [Hawk40] Integrate flashlight LED
-#if defined( ARIMA_PROJECT_HAWK40 )
-#include <linux/ctype.h>
-#include <linux/i2c.h>
-#include <mach/upmu_common_sw.h>
-#endif /* End.. (ARIMA_PROJECT_HAWK40) */
-//>2014/05/16-Yuting Shih-jessicatseng
-
 #define USE_UNLOCKED_IOCTL
 
-//<2014/05/16-Yuting Shih. Integrate flashlight LED.
-#if defined( ARIMA_PROJECT_HAWK40 )
-struct i2c_client   * flashlight_i2c_client = NULL;
-#endif /* End.. (ARIMA_PROJECT_HAWK40) */
+#define AS3647_REG_ChipID 0x00
+#define AS3647_REG_Current_Set_LED 0x01
+#define AS3647_REG_TXMask 0x03
+#define AS3647_REG_Low_Voltage 0x04
+#define AS3647_REG_Flash_Timer 0x05
+#define AS3647_REG_Control 0x06
+#define AS3647_REG_Strobe_Sigalling 0x07
+#define AS3647_REG_Fault 0x08
+#define AS3647_REG_PWM_and_Indicator 0x09
+//#define AS3647_REG_ChipID 0x0E
+//#define AS3647_REG_ChipID 0x0F
 
-#define FLASHLIGHT_DEVICE_ID      (0xC6)
-//>2014/05/16-Yuting Shih.
 
-//s_add new flashlight driver here
+//add new flashlight driver here
 //export funtions
 MUINT32 defaultFlashlightInit(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc);
 MUINT32 dummyFlashlightInit(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc);
@@ -46,31 +45,25 @@ MUINT32 torchFlashlightInit(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc);
 MUINT32 constantFlashlightInit(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc);
 
 
-int strobe_getPartId(int sensorDev);
-MUINT32 subStrobeInit(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc);
-MUINT32 subStrobeInit_2ndPart_2(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc);
-MUINT32 mainStrobeInit_2ndPart_2(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc);
-
 KD_FLASHLIGHT_INIT_FUNCTION_STRUCT kdFlashlightList[] =
 {
-    {defaultFlashlightInit},
+    {KD_DEFAULT_FLASHLIGHT_ID, defaultFlashlightInit},
 #if defined(DUMMY_FLASHLIGHT)
-	{dummyFlashlightInit},
+	{KD_DUMMY_FLASHLIGHT_ID, dummyFlashlightInit},
 #endif
 #if defined(PEAK_FLASHLIGHT)
-	{peakFlashlightInit},
+	{KD_PEAK_FLASHLIGHT_ID, peakFlashlightInit},
 #endif
 #if defined(TORCH_FLASHLIGHT)
-	{torchFlashlightInit},
+	{KD_TORCH_FLASHLIGHT_ID, torchFlashlightInit},
 #endif
 #if defined(CONSTANT_FLASHLIGHT)
-	{constantFlashlightInit},
+	{KD_CONSTANT_FLASHLIGHT_ID, constantFlashlightInit},
 #endif
 
 
-	{subStrobeInit},
 /*  ADD flashlight driver before this line */
-    {NULL}, //end of list
+    {0,NULL}, //end of list
 };
 //e_add new flashlight driver here
 /******************************************************************************
@@ -83,8 +76,76 @@ KD_FLASHLIGHT_INIT_FUNCTION_STRUCT kdFlashlightList[] =
 #define FALSE KAL_FALSE
 #endif
 
+/*************For as3647 flash ic S******************/
+static struct i2c_client * g_pstAS3647_I2Cclient = NULL;
+
+static int AS3647_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id);
+
+int s4AS3647_read_byte(u8 addr, u8 *data)
+{
+#if 1
+	u8 buf;
+	int ret = 0;
+
+	buf = addr;
+	
+	ret = i2c_master_send(g_pstAS3647_I2Cclient, &buf, 1);
+	if (ret < 0) {
+		printk("s4AS3647_read_byte send command error!!  ret=%d\n",ret);
+		return -EFAULT;
+	}
+	ret = i2c_master_recv(g_pstAS3647_I2Cclient, &buf, 1);
+	if (ret < 0) {
+		printk("s4AS3647_read_byte reads data error!!  ret=%d\n",ret);
+		return -EFAULT;
+	}
+
+	*data = buf;
+	return 0;
+	#else
+	int  i4RetValue = 0;
+	i4RetValue = iReadReg(addr,data,OV8850AF_VCM_WRITE_ID);
+	if (i4RetValue < 0) 	{
+		OV8850AFDB("s4OV8850AF_read_byte failed--Mbyte!! \n");
+		return -1;
+	}
+
+	return 0;
+	#endif
+}
+
+int s4AS3647_write_byte(u8 addr, u8 data)
+{
+#if 1
+	u8 buf[] = {addr, data};
+	int ret = 0;
+
+	ret = i2c_master_send(g_pstAS3647_I2Cclient, (const char*)buf, sizeof(buf));
+	if (ret < 0) {
+	    printk("s4AS3647_write_byte send data error!!   ret=%d\n",ret);
+	    return -EFAULT;
+	}
+
+	return 0;
+#else
+	int  i4RetValue = 0;
+	i4RetValue = iWriteReg(addr,(u32)data,1,OV8850AF_VCM_WRITE_ID);
+	if (i4RetValue < 0) {
+	    OV8850AFDB("s4OV8850AF_write_byte  send data error!!   i4RetValue=%d\n",i4RetValue);
+	    return -EFAULT;
+	}
+	return 0;
+#endif
+}
+/*************For as3647 flash ic E******************/
+
 /* device name and major number */
 #define FLASHLIGHT_DEVNAME            "kd_camera_flashlight"
+/*For A3647 FLASHLED IC register*/
+#define LENS_I2C_BUSNUM 1
+#define AS3647_DEVNAME "AS3647" 
+static struct i2c_board_info __initdata flashled_dev={ I2C_BOARD_INFO(AS3647_DEVNAME, 0x60>>1)};
+
 
 #define DELAY_MS(ms) {mdelay(ms);}//unit: ms(10^-3)
 #define DELAY_US(us) {mdelay(us);}//unit: us(10^-6)
@@ -128,13 +189,9 @@ KD_FLASHLIGHT_INIT_FUNCTION_STRUCT kdFlashlightList[] =
 
 *****************************************************************************/
 static FLASHLIGHT_FUNCTION_STRUCT *g_pFlashlightFunc = NULL;
-static int g_strobePartIdMain=1;
-static int g_strobePartIdSub=1;
-static int g_strobePartIdMainSecond=1;
 /*****************************************************************************
 
 *****************************************************************************/
-
 MINT32 default_flashlight_open(void *pArg) {
     PK_DBG("[default_flashlight_open] E\n");
     return 0;
@@ -171,7 +228,7 @@ FLASHLIGHT_FUNCTION_STRUCT	defaultFlashlightFunc=
 	default_flashlight_ioctl,
 };
 
-UINT32 defaultFlashlightInit(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc) {
+UINT32 defaultFlashlightInit(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc) { 
     if (pfFunc!=NULL) {
         *pfFunc=&defaultFlashlightFunc;
     }
@@ -180,51 +237,11 @@ UINT32 defaultFlashlightInit(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc) {
 /*******************************************************************************
 * kdSetDriver
 ********************************************************************************/
-int kdSetFlashlightDrv(unsigned int *pSensorId)
+int kdSetFlashlightDrv(unsigned int *pFlashlightIdx)
 {
-	int partId;
-	if(*pSensorId==e_CAMERA_MAIN_SENSOR)
-		partId = g_strobePartIdMain;
-	else if(*pSensorId==e_CAMERA_SUB_SENSOR)
-		partId = g_strobePartIdSub;
-	else
-		partId=1;
-
-	PK_DBG("sensorDev=%d, strobePartIdaa= %d\n",*pSensorId, partId);
-
-
-	if(*pSensorId==e_CAMERA_MAIN_SENSOR)
-	{
-
-#if defined(DUMMY_FLASHLIGHT)
-		defaultFlashlightInit(&g_pFlashlightFunc);
-
-#else
-		if(partId==1)
-			constantFlashlightInit(&g_pFlashlightFunc);
-		else //if(partId==2)
-			mainStrobeInit_2ndPart_2(&g_pFlashlightFunc);
-#endif
-	}
-	else if(*pSensorId==e_CAMERA_SUB_SENSOR && partId==1)
-	{
-		subStrobeInit(&g_pFlashlightFunc);
-	}
-	else if(*pSensorId==e_CAMERA_SUB_SENSOR && partId==2)
-	{
-		subStrobeInit_2ndPart_2(&g_pFlashlightFunc);
-	}
-	else
-	{
-		defaultFlashlightInit(&g_pFlashlightFunc);
-	}
-
-
-
-
-/*
-    PK_DBG("[kdSetFlashlightDrv] flashlightIdx: %d, seonsorId %d\n",flashlightIdx, (int)(*pSensorId));
-
+unsigned int flashlightIdx = *pFlashlightIdx;
+    PK_DBG("[kdSetFlashlightDrv] flashlightIdx: %d \n",flashlightIdx);
+    
     if (NULL != kdFlashlightList[flashlightIdx].flashlightInit) {
         kdFlashlightList[flashlightIdx].flashlightInit(&g_pFlashlightFunc);
         if (NULL == g_pFlashlightFunc) {
@@ -237,7 +254,7 @@ int kdSetFlashlightDrv(unsigned int *pSensorId)
                 }
             }
         }
-    }*/
+    }
 
     //open flashlight driver
     if (g_pFlashlightFunc) {
@@ -255,45 +272,15 @@ static long flashlight_ioctl(struct file *file, unsigned int cmd, unsigned long 
 static int flashlight_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg)
 #endif
 {
-	int partId;
     int i4RetValue = 0;
 
-    PK_DBG("XXflashlight_ioctl cmd,arg= %x, %x +\n",cmd,(unsigned int)arg);
+    //PK_DBG("%x, %x \n",cmd,arg);
 
     switch(cmd)
     {
         case FLASHLIGHTIOC_X_SET_DRIVER:
             i4RetValue = kdSetFlashlightDrv((unsigned int*)&arg);
             break;
-
-
-       	case FLASH_IOC_GET_MAIN_PART_ID:
-       		partId = strobe_getPartId(e_CAMERA_MAIN_SENSOR);
-       		g_strobePartIdMain = partId;
-       		if(copy_to_user((void __user *) arg , (void*)&partId , 4))
-			{
-			    PK_DBG("[FLASH_IOC_GET_MAIN_PART_ID] ioctl copy to user failed\n");
-			    return -EFAULT;
-			}
-          	break;
-		case FLASH_IOC_GET_SUB_PART_ID:
-       		partId = strobe_getPartId(e_CAMERA_SUB_SENSOR);
-       		g_strobePartIdSub = partId;
-       		if(copy_to_user((void __user *) arg , (void*)&partId , 4))
-			{
-			    PK_DBG("[FLASH_IOC_GET_SUB_PART_ID] ioctl copy to user failed\n");
-			    return -EFAULT;
-			}
-          	break;
-		case FLASH_IOC_GET_MAIN2_PART_ID:
-       		partId = strobe_getPartId(e_CAMERA_MAIN_2_SENSOR);
-       		g_strobePartIdMainSecond = partId;
-       		if(copy_to_user((void __user *) arg , (void*)&partId , 4))
-			{
-			    PK_DBG("[FLASH_IOC_GET_MAIN2_PART_ID] ioctl copy to user failed\n");
-			    return -EFAULT;
-			}
-          	break;
     	default :
     	    if (g_pFlashlightFunc) {
     	        i4RetValue = g_pFlashlightFunc->flashlight_ioctl(cmd,arg);
@@ -305,9 +292,11 @@ static int flashlight_ioctl(struct inode *inode, struct file *file, unsigned int
 }
 
 static int flashlight_open(struct inode *inode, struct file *file)
-{
+{	
+	
     int i4RetValue = 0;
     PK_DBG("[flashlight_open] E\n");
+	//hwPowerOn(MT65XX_POWER_LDO_VCAM_IO, VOL_1800,"flashlight");
     return i4RetValue;
 }
 
@@ -349,232 +338,56 @@ static struct device *flashlight_device = NULL;
 static struct flashlight_data flashlight_private;
 static dev_t flashlight_devno;
 static struct cdev flashlight_cdev;
+/*****************************************************************************
+AS3647 driver define
+*****************************************************************************/
+static int AS3647_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
+{
+	u8 as3647id = 0;
+	u8 tmp = 0;
+	u8 id1 = 0;
+	int i4RetValue = 0;
+	
+	printk("[AS3647_i2c_probe]  Attach I2C   \n");
 
+	printk("AS3647_i2c_probe client->timing=%x,addr=%x \n",client->timing,client->addr);
+
+	g_pstAS3647_I2Cclient = client;	
+
+	s4AS3647_read_byte(0x00, &as3647id);
+	
+	printk("xxxxxxxxxxxxxxxregister 0x00  = %d\n xxxxxxxxxxxxxx",as3647id);
+
+	return 0;
+}
+
+static int AS3647_i2c_remove()
+{
+	return 0;
+}
+static const struct i2c_device_id AS3647_i2c_id[] = {{AS3647_DEVNAME,0},{}};   
+struct i2c_driver AS3647_i2c_driver = {                       
+    .probe = AS3647_i2c_probe,                                   
+    .remove = AS3647_i2c_remove,                           
+    .driver.name = AS3647_DEVNAME,                 
+    .id_table = AS3647_i2c_id,                             
+};  
 /****************************************************************************/
-//<2014/05/16-Yuting Shih-jessicatseng. [Hawk40] Integrate flashlight LED
-//<2014/04/22-samhuang, porting Hawk's driver
-#if defined(ARIMA_PROJECT_HAWK40)
-
-#define GPIO_CAMERA_FLASH_MODE        (GPIO229)     /* TX/TORCH */
-#define GPIO_CAMERA_FLASH_MODE_M_GPIO (GPIO_MODE_00)
-    /*CAMERA-FLASH-T/F
-           H:flash mode
-           L:torch mode*/
-#define GPIO_CAMERA_FLASH_EN          (GPIO230)     /* STROBE */
-#define GPIO_CAMERA_FLASH_EN_M_GPIO   (GPIO_MODE_00)
-    /*CAMERA-FLASH-EN */
-
-#define FLASHLIGHT_POWER_IO           CAMERA_POWER_VCAM_D2  //MT65XX_POWER_LDO_VCAM_IO
-#define FLASHLIGHT_POWER_NAME         "flashlight"
-
-static ssize_t show_flashmode(struct device *dev, struct device_attribute *attr, char *buf)
-{
-int   ret = 0;
-char  databuf[2];
-
-    PK_DBG("[flashlight] show_flashmode\n");
-
-    hwPowerOn(FLASHLIGHT_POWER_IO, VOL_1800, FLASHLIGHT_POWER_NAME);
-    mdelay(2); 
-
-    databuf[0] = 0x09;
-    databuf[1] = 0x19;
-    i2c_master_send(flashlight_i2c_client, (const char*)&databuf, 2);
-
-    databuf[0] = 0x0A;
-    databuf[1] = 0x23; //0x12;
-    ret = i2c_master_send(flashlight_i2c_client, (const char*)&databuf, 2);
-
-    mt_set_gpio_mode(GPIO_CAMERA_FLASH_EN, GPIO_CAMERA_FLASH_EN_M_GPIO);
-    mt_set_gpio_dir(GPIO_CAMERA_FLASH_EN, GPIO_DIR_OUT);
-    mt_set_gpio_out(GPIO_CAMERA_FLASH_EN, GPIO_OUT_ONE);
-
-    mdelay(300);
-    mt_set_gpio_out(GPIO_CAMERA_FLASH_EN, GPIO_OUT_ZERO);
-
-    hwPowerDown(FLASHLIGHT_POWER_IO, FLASHLIGHT_POWER_NAME);
-    return sprintf(buf, "%u\n", ret);
-}
-
-static ssize_t show_torchmode(struct device *dev, struct device_attribute *attr, char *buf)
-{
-int   ret = 0;
-char  databuf[2];
-
-    PK_DBG("[flashlight] show_torchmode\n");
-
-    hwPowerOn(FLASHLIGHT_POWER_IO, VOL_1800, FLASHLIGHT_POWER_NAME);
-    mdelay(2); 
-
-    databuf[0] = 0x09;
-    databuf[1] = 0x19;
-    i2c_master_send(flashlight_i2c_client, (const char*)&databuf, 2);
-
-    databuf[0] = 0x0A;
-    databuf[1] = 0x12;
-    ret = i2c_master_send(flashlight_i2c_client, (const char*)&databuf, 2);
-
-    mt_set_gpio_mode(GPIO_CAMERA_FLASH_MODE, GPIO_CAMERA_FLASH_MODE_M_GPIO);
-    mt_set_gpio_dir(GPIO_CAMERA_FLASH_MODE, GPIO_DIR_OUT);
-    mt_set_gpio_out(GPIO_CAMERA_FLASH_MODE, GPIO_OUT_ONE);
-	mdelay(300);
-    mt_set_gpio_out(GPIO_CAMERA_FLASH_MODE, GPIO_OUT_ZERO);
-
-    hwPowerDown(FLASHLIGHT_POWER_IO, FLASHLIGHT_POWER_NAME);
-    return sprintf(buf, "%u\n", ret);
-}
-
-static ssize_t show_torchmode_on(struct device *dev, struct device_attribute *attr, char *buf)
-{
-int   ret = 0;
-char  databuf[2];
-
-    PK_DBG("[flashlight] show_torchmode_on\n");
-
-    hwPowerOn(FLASHLIGHT_POWER_IO, VOL_1800, FLASHLIGHT_POWER_NAME);
-    mdelay(2); 
-
-    databuf[0] = 0x09;
-    databuf[1] = 0x19;
-    i2c_master_send(flashlight_i2c_client, (const char*)&databuf, 2);
-	
-    databuf[0] = 0x0A;
-    databuf[1] = 0x12;
-    ret = i2c_master_send(flashlight_i2c_client, (const char*)&databuf, 2);
-
-    mt_set_gpio_mode(GPIO_CAMERA_FLASH_MODE, GPIO_CAMERA_FLASH_MODE_M_GPIO);
-    mt_set_gpio_dir(GPIO_CAMERA_FLASH_MODE, GPIO_DIR_OUT);
-    mt_set_gpio_out(GPIO_CAMERA_FLASH_MODE, GPIO_OUT_ONE);
-
-    hwPowerDown(FLASHLIGHT_POWER_IO, FLASHLIGHT_POWER_NAME);
-    return sprintf(buf, "%u\n", ret);
-}
-
-static ssize_t show_torchmode_off(struct device *dev, struct device_attribute *attr, char *buf)
-{
-int   ret = 0;
-char  databuf[2];
-
-    PK_DBG("[flashlight] show_torchmode_off\n");
-
-    hwPowerOn(FLASHLIGHT_POWER_IO, VOL_1800, FLASHLIGHT_POWER_NAME);
-    mdelay(2); 
-
-    mt_set_gpio_mode(GPIO_CAMERA_FLASH_MODE, GPIO_CAMERA_FLASH_MODE_M_GPIO);
-    mt_set_gpio_dir(GPIO_CAMERA_FLASH_MODE, GPIO_DIR_OUT);
-    mt_set_gpio_out(GPIO_CAMERA_FLASH_MODE, GPIO_OUT_ONE);
-
-    databuf[0] = 0x0A;
-    databuf[1] = 0x12;
-    ret = i2c_master_send(flashlight_i2c_client, (const char*)&databuf, 2);
-
-    //msleep(300);
-    mt_set_gpio_out(GPIO_CAMERA_FLASH_MODE, GPIO_OUT_ZERO);	
-
-    hwPowerDown(FLASHLIGHT_POWER_IO, FLASHLIGHT_POWER_NAME);
-    return sprintf(buf, "%u\n", ret);
-}
-
-
-static DEVICE_ATTR(flashmode, 0664, show_flashmode, NULL);
-static DEVICE_ATTR(torchmode, 0664, show_torchmode, NULL);
-static DEVICE_ATTR(torchmode_on, 0664, show_torchmode_on, NULL);
-static DEVICE_ATTR(torchmode_off, 0664, show_torchmode_off, NULL);
-
-
-static struct device_attribute *flashlight_class_attrs[] = {
-	&dev_attr_flashmode,
-	&dev_attr_torchmode,
-	&dev_attr_torchmode_on,
-	&dev_attr_torchmode_off,
-
-};
-
-static int flashlight_create_attr(struct device *dev) 
-{
-    int idx, err = 0;
-    int num = (int)(sizeof(flashlight_class_attrs)/sizeof(flashlight_class_attrs[0]));
-    if (!dev)
-        return -EINVAL;
-
-  printk("[flashlight_probe] create_attr,num=%d\n", num);  
-    for (idx = 0; idx < num; idx++)
-    {
-        if ((err = device_create_file(dev, flashlight_class_attrs[idx])))
-        {            
-            PK_DBG("device_create_file (%s) = %d\n", flashlight_class_attrs[idx]->attr.name, err);        
-            break;
-        }
-    }
-    
-    return err;
-}
-
-
-static int lm3642_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
-{
-
-	printk("[flashlight_probe] lm3642_i2c_probe\n");	
-	
-	flashlight_i2c_client = i2c;
-	
-//<2012/12/07-18438-jessicatseng, [Hawk40] Turn off torch mode in power-on sequence
-	mt_set_gpio_mode(GPIO_CAMERA_FLASH_MODE, GPIO_CAMERA_FLASH_MODE_M_GPIO);
-	mt_set_gpio_dir(GPIO_CAMERA_FLASH_MODE, GPIO_DIR_OUT);
-	mt_set_gpio_out(GPIO_CAMERA_FLASH_MODE, GPIO_OUT_ZERO);
-	
-	mt_set_gpio_mode(GPIO_CAMERA_FLASH_EN, GPIO_CAMERA_FLASH_EN_M_GPIO);
-	mt_set_gpio_dir(GPIO_CAMERA_FLASH_EN, GPIO_DIR_OUT);
-	mt_set_gpio_out(GPIO_CAMERA_FLASH_EN, GPIO_OUT_ZERO);
-//>2012/12/07-18438-jessicatseng.
-
-	return 0;
-}
-
-static int lm3642_i2c_remove(struct i2c_client *i2c)
-{
-//<2012/12/07-18438-jessicatseng, [Hawk 4.0] Turn off torch mode in power-on sequence
-	mt_set_gpio_mode(GPIO_CAMERA_FLASH_MODE, GPIO_CAMERA_FLASH_MODE_M_GPIO);
-	mt_set_gpio_dir(GPIO_CAMERA_FLASH_MODE, GPIO_DIR_OUT);
-	mt_set_gpio_out(GPIO_CAMERA_FLASH_MODE, GPIO_OUT_ZERO);
-	
-	mt_set_gpio_mode(GPIO_CAMERA_FLASH_EN, GPIO_CAMERA_FLASH_EN_M_GPIO);
-	mt_set_gpio_dir(GPIO_CAMERA_FLASH_EN, GPIO_DIR_OUT);
-	mt_set_gpio_out(GPIO_CAMERA_FLASH_EN, GPIO_OUT_ZERO);
-//>2012/12/07-18438-jessicatseng
-		
-	flashlight_i2c_client = NULL;
-	i2c_unregister_device(i2c);
-
-	return 0;
-}
-
-static const struct i2c_device_id lm3642_i2c_ids[] = {
-	{ "lm3642", 0 },
-	{ },
-};
-
-static struct i2c_board_info __initdata i2c_lm3642={ I2C_BOARD_INFO("lm3642", (0xC6>>1))};////init in module
-
-static struct i2c_driver lm3642_i2c_driver = {
-	.driver = {
-		   .name = "lm3642",
-		   .owner = THIS_MODULE,
-	},
-	.id_table	= lm3642_i2c_ids,
-	.probe		= lm3642_i2c_probe,
-	.remove		= __devexit_p(lm3642_i2c_remove),
-};
-#endif //defined(ARIMA_PROJECT_HAWK40)
-//>2014/04/22-samhuang
-//>2014/05/16-Yuting Shih-jessicatseng.
-
 #define ALLOC_DEVNO
 static int flashlight_probe(struct platform_device *dev)
 {
     int ret = 0, err = 0;
 
 	PK_DBG("[flashlight_probe] start\n");
+	/*AS3647 I2C add diver*/
+	if(i2c_add_driver(&AS3647_i2c_driver)!=0)
+   		 {
+       		 printk("[fan5405_init] failed to register fan5405 i2c driver.\n");
+    		}
+    	else
+   		 {
+       		 printk("[fan5405_init] Success to register fan5405 i2c driver.\n");
+    		}
 
 #ifdef ALLOC_DEVNO
     ret = alloc_chrdev_region(&flashlight_devno, 0, 1, FLASHLIGHT_DEVNAME);
@@ -614,12 +427,6 @@ static int flashlight_probe(struct platform_device *dev)
         goto flashlight_probe_error;
     }
 
-//<2014/05/16-Yuting Shih-jessicatseng. [Hawk 4.0] Integrate flashlight for JB.
-#if defined(ARIMA_PROJECT_HAWK40)
-    flashlight_create_attr(flashlight_device);
-#endif //defined(ARIMA_PROJECT_HAWK40)
-//>2014/05/16-Yuting Shih-jessicatseng.
-
     /*initialize members*/
     spin_lock_init(&flashlight_private.lock);
     init_waitqueue_head(&flashlight_private.read_wait);
@@ -646,7 +453,8 @@ static int flashlight_remove(struct platform_device *dev)
 {
 
     PK_DBG("[flashlight_probe] start\n");
-
+    i2c_del_driver(&AS3647_i2c_driver);
+	
 #ifdef ALLOC_DEVNO
     cdev_del(&flashlight_cdev);
     unregister_chrdev_region(flashlight_devno, 1);
@@ -681,18 +489,10 @@ static struct platform_device flashlight_platform_device = {
 static int __init flashlight_init(void)
 {
     int ret = 0;
-    PK_DBG("[flashlight_probe] start\n");
 
-//<2014/05/16-Yuting Shih-jessicatseng. [Hawk 4.0] Integrate flashlight for JB.
-#if defined(ARIMA_PROJECT_HAWK40)
-	i2c_register_board_info(1, &i2c_lm3642, 1);
-	if(i2c_add_driver(&lm3642_i2c_driver))
-	{
-		PK_DBG("[flashlight]add driver error\n");		
-		return -1;
-	}
-#endif //defined(ARIMA_PROJECT_HAWK40)
-//>2014/05/16-Yuting Shih-jessicatseng.
+    PK_DBG("[flashlight_probe] start\n");
+	
+	i2c_register_board_info(LENS_I2C_BUSNUM, &flashled_dev, 1);
 
 	ret = platform_device_register (&flashlight_platform_device);
 	if (ret) {
@@ -714,13 +514,6 @@ static void __exit flashlight_exit(void)
 {
     PK_DBG("[flashlight_probe] start\n");
     platform_driver_unregister(&flashlight_platform_driver);
-
-//<2014/05/16-Yuting Shih-jessicatseng. [Hawk 4.0] Integrate flashlight for JB.
-#if defined(ARIMA_PROJECT_HAWK40)
-    i2c_del_driver(&lm3642_i2c_driver);
-#endif //defined(ARIMA_PROJECT_HAWK40)
-//>2014/05/16-Yuting Shih-jessicatseng.
-
     //to flush work queue
     //flush_scheduled_work();
     PK_DBG("[flashlight_probe] done!\n");

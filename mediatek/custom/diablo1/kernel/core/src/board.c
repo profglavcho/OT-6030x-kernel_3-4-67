@@ -187,8 +187,9 @@ static void mtk_wcn_cmb_sdio_request_eirq(sdio_irq_handler_t irq_handler, void *
     mtk_wcn_sdio_irq_flag_set (0);
     mtk_wcn_cmb_sdio_eirq_data    = data;
     mtk_wcn_cmb_sdio_eirq_handler = irq_handler;
-    mt_eint_set_sens(mtk_wcn_cmb_sdio_eint_num, CUST_EINT_WIFI_SENSITIVE); /*CUST_EINT_WIFI_NUM */
+    #if CUST_EINT_WIFI_DEBOUNCE_EN
     mt_eint_set_hw_debounce(mtk_wcn_cmb_sdio_eint_num, CUST_EINT_WIFI_DEBOUNCE_CN); /*CUST_EINT_WIFI_NUM */
+    #endif
     mt_set_gpio_pull_enable(mtk_wcn_cmb_sdio_eint_pin, GPIO_PULL_ENABLE);
     mt_set_gpio_pull_select(mtk_wcn_cmb_sdio_eint_pin, GPIO_PULL_UP);
     mt_eint_registration(mtk_wcn_cmb_sdio_eint_num/*CUST_EINT_WIFI_NUM */,
@@ -325,11 +326,11 @@ static void mt_wifi_eirq_handler(void)
 
 static void mt_wifi_request_irq(sdio_irq_handler_t irq_handler, void *data)
 {
-    mt_eint_set_sens(CUST_EINT_WIFI_NUM, CUST_EINT_WIFI_SENSITIVE);
+    #if CUST_EINT_WIFI_DEBOUNCE_EN
     mt_eint_set_hw_debounce(CUST_EINT_WIFI_NUM, CUST_EINT_WIFI_DEBOUNCE_CN);
+    #endif
     mt_eint_registration(CUST_EINT_WIFI_NUM,
-        CUST_EINT_WIFI_DEBOUNCE_EN,
-        CUST_EINT_WIFI_POLARITY,
+        CUST_EINT_WIFI_TYPE,
         mt_wifi_eirq_handler,
         0);
     mt_eint_mask(CUST_EINT_WIFI_NUM);
@@ -448,7 +449,7 @@ EXPORT_SYMBOL(mt_wifi_power_off);
 /*=======================================================================*/
 /* Board Devices Capability                                              */
 /*=======================================================================*/
-#define MSDC_SDCARD_FLAG  (MSDC_SYS_SUSPEND | MSDC_WP_PIN_EN | MSDC_HIGHSPEED)  //| MSDC_CD_PIN_EN | MSDC_REMOVABLE 
+#define MSDC_SDCARD_FLAG  (MSDC_SYS_SUSPEND | MSDC_HIGHSPEED)  //| MSDC_CD_PIN_EN |MSDC_WP_PIN_EN | MSDC_REMOVABLE 
 #define MSDC_SDIO_FLAG    (MSDC_EXT_SDIO_IRQ | MSDC_HIGHSPEED)
 
 #if defined(CFG_DEV_MSDC0)
@@ -473,6 +474,9 @@ EXPORT_SYMBOL(mt_wifi_power_off);
 		.dat5rddly		= 0,
 		.dat6rddly		= 0,
 		.dat7rddly		= 0,
+		.datwrddly		= 0,
+		.cmdrrddly		= 0,
+		.cmdrddly		= 0,
 	    .request_sdio_eirq = mtk_wcn_cmb_sdio_request_eirq,
 	    .enable_sdio_eirq  = mtk_wcn_cmb_sdio_enable_eirq,
 	    .disable_sdio_eirq = mtk_wcn_cmb_sdio_disable_eirq,
@@ -505,6 +509,9 @@ EXPORT_SYMBOL(mt_wifi_power_off);
 		.dat5rddly		= 0,
 		.dat6rddly		= 0,
 		.dat7rddly		= 0,
+		.datwrddly		= 0,
+		.cmdrrddly		= 0,
+		.cmdrddly		= 0,
 	};
 	#endif
 #endif
@@ -529,6 +536,9 @@ EXPORT_SYMBOL(mt_wifi_power_off);
 		.dat5rddly		= 0,
 		.dat6rddly		= 0,
 		.dat7rddly		= 0,
+		.datwrddly		= 0,
+		.cmdrrddly		= 0,
+		.cmdrddly		= 0,
 	    .request_sdio_eirq = mtk_wcn_cmb_sdio_request_eirq,
 	    .enable_sdio_eirq  = mtk_wcn_cmb_sdio_enable_eirq,
 	    .disable_sdio_eirq = mtk_wcn_cmb_sdio_disable_eirq,
@@ -544,7 +554,11 @@ struct msdc_hw msdc1_hw = {
     .dat_drv        = 0,
     .data_pins      = 4,
     .data_offset    = 0,
-    .flags          = MSDC_SYS_SUSPEND | MSDC_WP_PIN_EN | MSDC_HIGHSPEED|MSDC_SPE | MSDC_CD_PIN_EN | MSDC_REMOVABLE,
+#if defined TINNO_ANDROID_S9091JB_SDIO
+    .flags          = MSDC_SYS_SUSPEND | MSDC_HIGHSPEED,
+#else
+    .flags          = MSDC_SYS_SUSPEND | MSDC_WP_PIN_EN | MSDC_HIGHSPEED|MSDC_SPE,
+#endif
     .dat0rddly		= 0,
 	.dat1rddly		= 0,
 	.dat2rddly		= 0,
@@ -553,6 +567,9 @@ struct msdc_hw msdc1_hw = {
 	.dat5rddly		= 0,
 	.dat6rddly		= 0,
 	.dat7rddly		= 0,
+	.datwrddly		= 0,
+	.cmdrrddly		= 0,
+	.cmdrddly		= 0,
 };
     #endif
 #endif
@@ -578,6 +595,9 @@ struct msdc_hw msdc1_hw = {
 		.dat5rddly		= 0,
 		.dat6rddly		= 0,
 		.dat7rddly		= 0,
+		.datwrddly		= 0,
+		.cmdrrddly		= 0,
+		.cmdrddly		= 0,
 	    .request_sdio_eirq = mtk_wcn_cmb_sdio_request_eirq,
 	    .enable_sdio_eirq  = mtk_wcn_cmb_sdio_enable_eirq,
 	    .disable_sdio_eirq = mtk_wcn_cmb_sdio_disable_eirq,
@@ -593,7 +613,7 @@ struct msdc_hw msdc1_hw = {
 	    .dat_drv        = 0,
 	    .data_pins      = 4,
 	    .data_offset    = 0,
-	    .flags          = MSDC_SYS_SUSPEND | MSDC_WP_PIN_EN,
+	    .flags          = MSDC_SYS_SUSPEND,    //| MSDC_WP_PIN_EN
 	    .dat0rddly		= 0,
 		.dat1rddly		= 0,
 		.dat2rddly		= 0,
@@ -602,6 +622,9 @@ struct msdc_hw msdc1_hw = {
 		.dat5rddly		= 0,
 		.dat6rddly		= 0,
 		.dat7rddly		= 0,
+		.datwrddly		= 0,
+		.cmdrrddly		= 0,
+		.cmdrddly		= 0,
 	};
 	#endif
 #endif
@@ -613,12 +636,12 @@ struct msdc_hw msdc1_hw = {
 	    .clk_src        = 1,
 	    .cmd_edge       = MSDC_SMPL_FALLING,
 	    .data_edge      = MSDC_SMPL_FALLING,
-	    .clk_drv        = 4,
-	    .cmd_drv        = 4,
-	    .dat_drv        = 4,
+	    .clk_drv        = 1,
+	    .cmd_drv        = 1,
+	    .dat_drv        = 1,
 	    .data_pins      = 4,
 	    .data_offset    = 0,
-	    .flags          = MSDC_EXT_SDIO_IRQ | MSDC_HIGHSPEED|MSDC_TABDRV,//| MSDC_HIGHSPEED
+	    .flags          = MSDC_EXT_SDIO_IRQ | MSDC_HIGHSPEED|MSDC_TABDRV|MSDC_INTERNAL_CLK,//| MSDC_HIGHSPEED
 	    .dat0rddly		= 0,
 		.dat1rddly		= 0,
 		.dat2rddly		= 0,
@@ -627,6 +650,9 @@ struct msdc_hw msdc1_hw = {
 		.dat5rddly		= 0,
 		.dat6rddly		= 0,
 		.dat7rddly		= 0,
+		.datwrddly		= 0,
+		.cmdrrddly		= 0,
+		.cmdrddly		= 0,
 	    .request_sdio_eirq = mtk_wcn_cmb_sdio_request_eirq,
 	    .enable_sdio_eirq  = mtk_wcn_cmb_sdio_enable_eirq,
 	    .disable_sdio_eirq = mtk_wcn_cmb_sdio_disable_eirq,
@@ -642,7 +668,7 @@ struct msdc_hw msdc1_hw = {
 	    .dat_drv        = 0,
 	    .data_pins      = 4,
 	    .data_offset    = 0,
-	    .flags          = MSDC_SYS_SUSPEND | MSDC_WP_PIN_EN | MSDC_HIGHSPEED,
+	    .flags          = MSDC_SYS_SUSPEND | MSDC_HIGHSPEED,   //| MSDC_WP_PIN_EN 
 	    .dat0rddly		= 0,
 		.dat1rddly		= 0,
 		.dat2rddly		= 0,
@@ -651,6 +677,9 @@ struct msdc_hw msdc1_hw = {
 		.dat5rddly		= 0,
 		.dat6rddly		= 0,
 		.dat7rddly		= 0,
+		.datwrddly		= 0,
+		.cmdrrddly		= 0,
+		.cmdrddly		= 0,
 	};
 	#endif
 #endif
